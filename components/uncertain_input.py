@@ -32,7 +32,7 @@ def _key_seed(base_seed: int | None, key: str) -> int | None:
 
 def uncertain_input(
     label:         str,
-    unit:          str,
+    units:         list,
     key:           str,
     distributions: list[str] | None = None,
     default_mode:  str = "Exact",
@@ -45,10 +45,10 @@ def uncertain_input(
     Parameters
     ----------
     label         : displayed above the widget
-    unit          : quantia unit string shown in brackets, e.g. "psia"
+    units         : list of quantia units
     key           : unique Streamlit key — prefix with page name to
                     avoid collisions, e.g. "pvt_api", "vol_porosity"
-    distributions : available modes; default is all four
+    distributions : available modes; default is all five
     default_mode  : which mode is pre-selected
     help          : optional tooltip
     default_value : starting value for Exact mode
@@ -59,75 +59,107 @@ def uncertain_input(
     ProbUnitFloat otherwise (n_samples from project session state)
     """
     if distributions is None:
-        distributions = ["Exact", "Uniform", "Normal", "Triangular"]
+        distributions = ["Exact", "Uniform", "Normal", "Triangular", "Lognormal"]
 
     n_samples  = st.session_state.get("project_n_samples", 3000)
     base_seed  = st.session_state.get("project_seed", None)
     this_seed  = _key_seed(base_seed, key)
 
-    st.markdown(
-        f"**{label}** &nbsp;`[{unit}]`"
-        + (f"<br><small>{help}</small>" if help else ""),
-        unsafe_allow_html=True,
-    )
+    label_col, dist_col, value_col, unit_col = st.columns([0.25, 0.15, 0.40, 0.2])
 
-    mode = st.selectbox(
-        "Distribution",
-        options=distributions,
-        index=distributions.index(default_mode) if default_mode in distributions else 0,
-        key=f"{key}_mode",
-        label_visibility="collapsed",
-    )
-
-    # ── Exact ─────────────────────────────────────────────────────────────────
-    if mode == "Exact":
-        val = st.number_input(
-            "Value", value=float(default_value),
-            key=f"{key}_val", label_visibility="collapsed",
+    with label_col:
+        st.markdown(
+            f"**{label}**"
+            + (f"<br><small>{help}</small>" if help else ""),
+            unsafe_allow_html=True,
         )
-        return qu.Q(val, unit)
 
-    # ── Uniform ───────────────────────────────────────────────────────────────
-    elif mode == "Uniform":
-        c1, c2 = st.columns(2)
-        lo = c1.number_input("Low",  value=float(default_value) * 0.8 or 0.0,
-                              key=f"{key}_lo")
-        hi = c2.number_input("High", value=float(default_value) * 1.2 or 1.0,
-                              key=f"{key}_hi")
-        if lo >= hi:
-            st.error("Low must be less than High.")
-            return qu.Q(lo, unit)
-        with qu.config(n_samples=n_samples, seed=this_seed):
-            return qu.ProbUnitFloat.uniform(lo, hi, unit, n=n_samples)
+    with dist_col:
+        mode = st.selectbox(
+            "Distribution",
+            options=distributions,
+            index=distributions.index(default_mode) if default_mode in distributions else 0,
+            key=f"{key}_mode",
+            # label_visibility="collapsed",
+        )
+    
+    with unit_col:
+        unit = st.selectbox(
+            "Unit",
+            options=units,
+            index=0,
+            key=f"{key}_unit",
+            # label_visibility="collapsed",
+        )
 
-    # ── Normal ────────────────────────────────────────────────────────────────
-    elif mode == "Normal":
-        c1, c2 = st.columns(2)
-        mean = c1.number_input("Mean",    value=float(default_value),
-                               key=f"{key}_mean")
-        std  = c2.number_input("Std dev", value=abs(float(default_value)) * 0.1 or 1.0,
-                               min_value=1e-9, key=f"{key}_std")
-        with qu.config(n_samples=n_samples, seed=this_seed):
-            return qu.ProbUnitFloat.normal(mean, std, unit, n=n_samples)
+    with value_col:
+        # ── Exact ────────────────────────────────────────────────────────────
+        if mode == "Exact":
+            val = st.number_input(
+                "Value",
+                value=float(default_value),
+                key=f"{key}_val",
+                # label_visibility="collapsed",
+            )
+            return qu.Q(val, unit)
 
-    # ── Triangular ────────────────────────────────────────────────────────────
-    elif mode == "Triangular":
-        c1, c2, c3 = st.columns(3)
-        lo   = c1.number_input("Low",  value=float(default_value) * 0.8 or 0.0,
-                               key=f"{key}_lo")
-        mode_v = c2.number_input("Mode", value=float(default_value),
-                                 key=f"{key}_mode_val")
-        hi   = c3.number_input("High", value=float(default_value) * 1.2 or 1.0,
-                               key=f"{key}_hi")
-        if not (lo <= mode_v <= hi):
-            st.error("Must satisfy Low ≤ Mode ≤ High.")
-            return qu.Q(mode_v, unit)
-        if lo == hi:
-            st.error("Low and High must differ.")
-            return qu.Q(lo, unit)
-        with qu.config(n_samples=n_samples, seed=this_seed):
-            return qu.ProbUnitFloat.triangular(lo, mode_v, hi, unit, n=n_samples)
+        # ── Uniform ──────────────────────────────────────────────────────────
+        elif mode == "Uniform":
+            c1, c2 = st.columns(2)
+            lo = c1.number_input(
+                "Low",
+                value=float(default_value) * 0.8 or 0.0,
+                key=f"{key}_lo"
+            )
+            hi = c2.number_input(
+                "High",
+                value=float(default_value) * 1.2 or 1.0,
+                key=f"{key}_hi"
+            )
+            if lo >= hi:
+                st.error("Low must be less than High.")
+                return qu.Q(lo, unit)
+            with qu.config(n_samples=n_samples, seed=this_seed):
+                return qu.ProbUnitFloat.uniform(lo, hi, unit, n=n_samples)
 
-    else:
-        st.error(f"Unknown mode: {mode}")
-        return qu.Q(float(default_value), unit)
+        # ── Normal ───────────────────────────────────────────────────────────
+        elif mode == "Normal":
+            c1, c2 = st.columns(2)
+            mean = c1.number_input("Mean",    value=float(default_value),
+                                key=f"{key}_mean")
+            std  = c2.number_input("Std dev", value=abs(float(default_value)) * 0.1 or 1.0,
+                                min_value=1e-9, key=f"{key}_std")
+            with qu.config(n_samples=n_samples, seed=this_seed):
+                return qu.ProbUnitFloat.normal(mean, std, unit, n=n_samples)
+
+        # ── Triangular ───────────────────────────────────────────────────────
+        elif mode == "Triangular":
+            c1, c2, c3 = st.columns(3)
+            lo   = c1.number_input("Low",  value=float(default_value) * 0.8 or 0.0,
+                                key=f"{key}_lo")
+            mode_v = c2.number_input("Mode", value=float(default_value),
+                                    key=f"{key}_mode_val")
+            hi   = c3.number_input("High", value=float(default_value) * 1.2 or 1.0,
+                                key=f"{key}_hi")
+            if not (lo <= mode_v <= hi):
+                st.error("Must satisfy Low ≤ Mode ≤ High.")
+                return qu.Q(mode_v, unit)
+            if lo == hi:
+                st.error("Low and High must differ.")
+                return qu.Q(lo, unit)
+            with qu.config(n_samples=n_samples, seed=this_seed):
+                return qu.ProbUnitFloat.triangular(lo, mode_v, hi, unit, n=n_samples)
+
+        # ── Lognormal ───────────────────────────────────────────────────────────
+        elif mode == "Lognormal":
+            c1, c2 = st.columns(2)
+            mean = c1.number_input("Mean",    value=float(default_value),
+                                key=f"{key}_mean")
+            std  = c2.number_input("Std dev", value=abs(float(default_value)) * 0.1 or 1.0,
+                                min_value=1e-9, key=f"{key}_std")
+            with qu.config(n_samples=n_samples, seed=this_seed):
+                return qu.ProbUnitFloat.lognormal(mean, std, unit, n=n_samples)
+
+        else:
+            st.error(f"Unknown mode: {mode}")
+            return qu.Q(float(default_value), unit)
